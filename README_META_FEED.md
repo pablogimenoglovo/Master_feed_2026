@@ -1,53 +1,321 @@
-# Meta Feed Generator — Knowledge Base
+# Master Feed 2026 — Complete Knowledge Base
 
 ## Overview
 
-This project generates Meta (Facebook) advertising feed spreadsheets for Glovo's referral/growth campaigns. It programmatically creates rows in Google Sheets using the Sheets API, multiplying ad templates by countries, cities, and languages.
+This project generates advertising feed spreadsheets for Glovo's rider referral/growth campaigns across Meta (Facebook), PMax (Google), and App channels. It programmatically creates rows in Google Sheets using the Sheets API, multiplying ad templates by countries, cities, and languages.
+
+The system spans **3 interconnected Google Spreadsheets** that together form the budget allocation and ad feed pipeline.
 
 ---
 
-## Architecture
+## System Architecture (3 Spreadsheets)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Google Sheets Workbook                     │
-│  ID: 17-Dy3aPCaqCMia51s-7lNAjRmp4wpT2860jhP_PzrZs          │
-├─────────────────────────────────────────────────────────────┤
-│  Copy of Meta Feed_City      → 111,350 rows (city-level)    │
-│  Copy of Meta Feed_Countries → 2,400 rows (country-level)   │
-│  Control Room                → 952 cities (source data)     │
-│  geo_helper                  → 228K rows (5.9M cells!)      │
-│  + 14 other tabs                                             │
-└─────────────────────────────────────────────────────────────┘
-         ▲
-         │ Google Sheets API v4 (service account)
-         │
-┌────────┴────────────────────────────────────────────────────┐
-│  Scripts (Python 3.9.13)                                     │
-│                                                              │
-│  meta_feed_city_generator.py      → City feed (952 cities)  │
-│  meta_feed_countries_generator.py → Country feed (22 countries)│
-└─────────────────────────────────────────────────────────────┘
-         ▲
-         │ Reads source data from
-         │
-┌────────┴────────────────────────────────────────────────────┐
-│  Source Files (Downloads folder)                             │
-│                                                              │
-│  Master Feed - 2026 - Control Room.csv      → 952 cities    │
-│  DH Migration - UTMs - Global URL Generator (2).csv         │
-│  Master Feed _ Vol 3 - Capital_feed (1).csv                  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPREADSHEET 1: "Performance Manager"                                        │
+│  ID: 1kiBwNVCWnyS922H30XS22xFhp1Odennhp27MzfYBmuU                          │
+│  ─────────────────────────────────────────────────────────────────────────── │
+│                                                                              │
+│  Split_performance ──→ Raw CPD/GAC data (IMPORTRANGE from Google Ads)        │
+│         │                                                                    │
+│         ▼                                                                    │
+│  Split_v2 ──→ Calculates optimal budget split per city per channel           │
+│         │     Cols E-H: Overrides (split_convers/perfmax/meta/app)           │
+│         │     Cols I-L: Final computed split percentages                      │
+│         │                                                                    │
+│         ▼                                                                    │
+│  PM_overrides ──→ Python optimizer writes override splits here               │
+│                                                                              │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       │ split %s flow into budgets...
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPREADSHEET 2: "Master Feed | Vol 3" (REFERENCE — previous version)         │
+│  ID: 1eK3-JdZQxbW5yPVcZrJY-RwhL7snNuMtadv4vsboZDk                          │
+│  ─────────────────────────────────────────────────────────────────────────── │
+│                                                                              │
+│  Control_room ──→ Per-city config: Budget, Campaign/Ad status, URLs, Pages   │
+│         │                                                                    │
+│         ▼                                                                    │
+│  Capital_feed ──→ Meta ad rows for capital cities                            │
+│  Country_feed ──→ Meta ad rows for non-capital cities (grouped by country)   │
+│  All_feeds ────→ Combined final export                                       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       │ 2026 version...
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPREADSHEET 3: "Master Feed - 2026" (OUR WORKBOOK — current production)     │
+│  ID: 17-Dy3aPCaqCMia51s-7lNAjRmp4wpT2860jhP_PzrZs                          │
+│  ─────────────────────────────────────────────────────────────────────────── │
+│                                                                              │
+│  Control Room ──→ 952 cities × 52 cols (3 daily budgets: Meta/PMax/App)      │
+│         │                                                                    │
+│         ▼                                                                    │
+│  Copy of Meta Feed_City ──→ 111,350 rows (generated by our scripts)          │
+│  Copy of Meta Feed_Countries ──→ 2,400 rows (generated by our scripts)       │
+│  PMax Feed ──→ (not yet generated)                                           │
+│  App Feed ──→ (not yet generated)                                            │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Credentials
+## Spreadsheet 1: Performance Manager (Budget Split Engine)
 
-- **File**: `C:\Users\PabloGimeno\Documents\GitHub\Referral-Calculator\credentials.json`
-- **Service account**: `fsp-growth-bot@dhub-glovo.iam.gserviceaccount.com`
-- **Project**: `dhub-glovo`
-- **Scopes needed**: `spreadsheets`, `drive`
+**ID**: `1kiBwNVCWnyS922H30XS22xFhp1Odennhp27MzfYBmuU`
+
+### Purpose
+Calculates what % of each city's total daily budget should go to each advertising channel (Google Conversions, Google PMax, Meta, App).
+
+### Tabs
+
+| Tab | Size | Purpose |
+|-----|------|---------|
+| Split_v2 | 990×48 | **Main split calculator** — produces final % split per city |
+| Split_defaults | 1001×26 | Country-level defaults and channel exclusions |
+| Split_v1 | 998×25 | Legacy version (3 channels only) |
+| Split_v3 | 998×31 | Alternative version |
+| Split_performance | 1532×106 | CPD data by channel (monthly, imported) |
+| Split_performance2 | 1533×182 | Extended performance data (CPD + GAC + Cost) |
+| PM_overrides | 1000×26 | Python optimizer output (manual/automated overrides) |
+| PM_optimization_full | 1000×28 | Full optimization context |
+| Campaigns_export | 2172×29 | Google Ads campaign list |
+| tCPA test | 999×14 | Target CPA calculations |
+| Campaign_report | 999×27 | Campaign metadata from Google Ads |
+| Performance_import | 1528×169 | IMPORTRANGE from Google monthly reporting |
+| Alarms_import | 4286×199 | IMPORTRANGE from monitoring system |
+| Pacing_import | 3785×62 | Pacing data (daily budgets, labels) |
+
+### Split_v2 — Column Structure (48 columns)
+
+| Section | Columns | Headers | Description |
+|---------|---------|---------|-------------|
+| Identity | A-D | City, Country, Region, Size | City identification |
+| **Overrides** | E-H | split_convers, split_perfmax, split_meta, **split_app** | Manual/optimizer overrides (static values) |
+| **Final % split** | I-L | split_convers, split_perfmax, split_meta, **split_app** | Computed final percentages (formulas) |
+| Pacing | N-P | Pacing L7D, Label, Daily | Budget context from Pacing_import |
+| Split with defaults | Q-S | split_convers_excl, split_perfmax_excl, split_meta_excl | After country exclusions applied |
+| Daily helpers | T-V | helper_convers, helper_perfmax, helper_meta | = split% × daily budget |
+| Initial split | W-Y | initial_split_convers, initial_split_perfmax, initial_split_meta | Pure data-based split |
+| Inverse weights | Z-AB | weight_inv_convers, weight_inv_perfmax, weight_inv_meta | Efficiency weights |
+| Inversed CPD/GAC | AC-AH | inv_cpd_*, inv_gac_* | 1/cost (cheaper = higher) |
+| Raw CPD/GAC | AI-AN | cpd_*, gac_* | Actual costs from Split_performance |
+
+### Split_v2 — Calculation Chain
+
+```
+Step 1: Raw CPD/GAC (cols AI-AN)
+   Formula: =xlookup(city, Split_performance!C:C, Split_performance!F:F)
+   → Gets actual cost-per-delivery and google-acquisition-cost per channel
+
+Step 2: Inversed costs (cols AC-AH)
+   Formula: =iferror(1/AI, 0)
+   → Cheaper channel gets higher inverse value = more budget
+
+Step 3: Composite weights (cols Z-AB)
+   Formula: =(AC*0.3) + (AF*0.7)
+   → 30% CPD weight + 70% GAC weight combined
+
+Step 4: Initial split % (cols W-Y)
+   Formula: =iferror(Z/SUM(Z:AB), 0)
+   → Normalize weights to percentages that sum to 100%
+
+Step 5: Apply country exclusions (cols Q-S)
+   Formula: Complex IF/VLOOKUP to Split_defaults
+   → If country excludes a channel → 0%, redistribute proportionally
+   → If all channels excluded → use country default
+
+Step 6: Final split % (cols I-K)
+   Formula: Complex conditional based on minimum daily budget (€5 threshold)
+   → If daily_helper (T/U/V) ≤ €5 → 0% (too small to be effective)
+   → Redistribute to remaining channels
+   → Prevents micro-budgets on unprofitable channels
+```
+
+### Split_v2 — Key Formulas (verbatim)
+
+**Final split_convers (col I):**
+```
+=if(
+  IF(T4 <= 5, 0, Q4 / (Q4*(T4>5) + R4*(U4>5) + S4*(V4>5))) = 0,
+  if(Q4=MAX(Q4:S4), 1, 0),
+  IF(T4 <= 5, 0, Q4 / (Q4*(T4>5) + R4*(U4>5) + S4*(V4>5)))
+)
+```
+
+**Split with defaults (col Q):**
+```
+=IF(VLOOKUP(B4, Split_defaults!A:E, 3, FALSE), 0,
+   IF(SUM(
+     IF(VLOOKUP(B4,Split_defaults!A:E,3,FALSE), 0, W4),
+     IF(VLOOKUP(B4,Split_defaults!A:E,4,FALSE), 0, X4),
+     IF(VLOOKUP(B4,Split_defaults!A:E,5,FALSE), 0, Y4)) = 0,
+   IF(VLOOKUP(B4,Split_defaults!A:E,2,FALSE)="convers", 1, 0),
+   W4 / (1 - IF(VLOOKUP(B4,Split_defaults!A:E,3,FALSE),W4,0)
+            - IF(VLOOKUP(B4,Split_defaults!A:E,4,FALSE),X4,0)
+            - IF(VLOOKUP(B4,Split_defaults!A:E,5,FALSE),Y4,0))))
+```
+
+**Daily budget (col P):**
+```
+=MAX(XLOOKUP(A4, Pacing_import!A:A, Pacing_import!AB:AB), 5.4)
+```
+
+### Split_defaults Structure
+```
+| Country | Default  | excl_convers | excl_perfmax | excl_meta |
+|---------|----------|--------------|--------------|-----------|
+| ES      | convers  | FALSE        | FALSE        | FALSE     |
+| UA      | convers  | FALSE        | FALSE        | TRUE      |
+| MA      | meta     | FALSE        | FALSE        | FALSE     |
+```
+
+### PM_overrides Structure
+```
+| city | country | split_convers | split_perfmax | split_meta | prev_* | cpd_* | ratio | target_pct | cheapest | excluded | reason | last_updated |
+```
+Written by `pm-budget-optimizer` Python script (repo: `pablogimenoglovo/pm-budget-optimizer`).
+
+### CRITICAL: split_app Status
+
+**`split_app` column has been ADDED but NOT YET INTEGRATED into formulas:**
+- Headers exist (row 2, cols H and L)
+- Data rows are EMPTY (no values, no formulas)
+- Final split formulas (I/J/K) only reference 3 channels (Q/R/S)
+- Split_defaults only has 3 exclusion columns (C/D/E)
+- To fully integrate: need split_app in formulas I-L, add exclusion column to Split_defaults, update PM_overrides schema
+
+---
+
+## Spreadsheet 2: Master Feed Vol 3 (Reference Implementation)
+
+**ID**: `1eK3-JdZQxbW5yPVcZrJY-RwhL7snNuMtadv4vsboZDk`
+
+### Purpose
+Previous version (2025) of the ad feed system. Use as reference for formula patterns.
+
+### Tabs
+
+| Tab | Size | Purpose |
+|-----|------|---------|
+| All_feeds | 6481×45 | Combined output (Capital + Country feeds) |
+| Control_room | 99×21 | City config: budget, status, URLs, pages |
+| Capital_feed | 2006×35 | Meta ads for capital cities |
+| Country_feed | 5056×35 | Meta ads for non-capital cities |
+| Images | 1000×5 | Creative image URLs by country/subtype |
+| Accounts pages | 1000×26 | FB/IG page IDs by country |
+| Earnings_import | 1542×11 | Weekly/monthly earnings by city |
+| Copies_import | 1000×26 | Ad copy translations by language/subtype |
+| Pacing_import | 1712×35 | Budget pacing data |
+| Cities_import | 2498×26 | City metadata |
+
+### Control_room Structure (starts row 6)
+```
+| Col A  | Col B | Col C     | Col D            | Col E     | Col F   | Col G           | Col H-P (Ad set/Ad status) | Col T  |
+|--------|-------|-----------|------------------|-----------|---------|-----------------|----------------------------|--------|
+| Country| City  | City size | Target area      | City name | Budget  | Campaign status | Per-subtype status          | URL    |
+| AM     | YRV   | Capital   | Yerevan, Armenia | Yerevan   | 5.4     | Paused          | ...                         | https://am.rider.glovoapp.com/ |
+```
+
+### Capital_feed Formula Patterns (ALL columns)
+
+| Column | Header | Formula |
+|--------|--------|---------|
+| C | Ad label | `="Ad "&B2` |
+| D | Campaign status | `=xlookup($H2, Control_room!$B:$B, Control_room!$G:$G)` |
+| E | Ad set status | `=iferror(if(L2="Benefits",vlookup(H2,control_room,7,FALSE), if(L2="Vehicles",vlookup(H2,control_room,8,FALSE), if(L2="All",vlookup(H2,control_room,9,FALSE)))),"Paused")` |
+| F | Ad status | `=if(M2="Earnings",VLOOKUP(H2,control_room,10,FALSE), if(M2="Flexibility",..., if(M2="Referral",...)))` |
+| J | Target area | `=xlookup(H2, Control_room!$B:$B, Control_room!$D:$D)` |
+| **K** | **Budget** | **`=xlookup($H2, Control_room!$B:$B, Control_room!$F:$F)`** |
+| O | Campaign name | `=IF(I2="Capital", "Facebook_Glovers_"&G2&"_"&H2&"_"&I2&"_2025_v3", "Facebook_Glovers_"&G2&"_Country_2025_v3")` |
+| P | Ad Set Name | `=CONCATENATE(G2,"_",H2,"_",L2,"_",UPPER(S2))` |
+| Q | Ad Name | `=LOWER(CONCATENATE(G2,"-",H2,"-",M2,"-",S2))` |
+| T | Message | `=FILTER(INDEX(Copies_import!$B:$Z,, MATCH($S2, Copies_import!$B$1:$Z$1, 0)), (ISNUMBER(SEARCH(T$1, Copies_import!$B:$B))) * (Copies_import!$A:$A=$M2))` |
+| U | Title | Same FILTER pattern as Message |
+| V | Description | Same FILTER pattern as Message |
+| W | Creative text | `="Зарабатывайте до KGS"& TEXT(FLOOR(ROUND(AF2,0),10),"#,##0") &" в месяц"` |
+| X | CTA | Same FILTER pattern as Message |
+| Z | Square | `=INDEX(Images!C:C, MATCH(1, (Images!$A:$A=$G2)*(Images!$B:$B=$M2), 0))` |
+| AA | Horizontal | `=INDEX(Images!D:D, MATCH(1, (Images!$A:$A=$G2)*(Images!$B:$B=$M2), 0))` |
+| AB | Vertical | `=INDEX(Images!E:E, MATCH(1, (Images!$A:$A=$G2)*(Images!$B:$B=$M2), 0))` |
+| AC | CTA_Button | `=xlookup(H2, Control_room!B:B, Control_room!T:T)` |
+| AD | CTA_Link | `=xlookup(H2,Control_room!B:B,Control_room!T:T)&"?utm_source=facebook&utm_medium=paid&city_code="&H2&"&utm_campaign="&H2&"-"` |
+| AE | Weekly earnings | Complex CHOOSE/MATCH formula from Earnings_import |
+| AF | Monthly earnings | Complex CHOOSE/MATCH formula from Earnings_import |
+| AG | Fb page | `=xlookup(G2,'Accounts pages'!A:A,'Accounts pages'!B:B)` |
+| AH | Ig page | `=xlookup(G2,'Accounts pages'!A:A,'Accounts pages'!C:C)` |
+
+---
+
+## Spreadsheet 3: Master Feed - 2026 (Our Production Workbook)
+
+**ID**: `17-Dy3aPCaqCMia51s-7lNAjRmp4wpT2860jhP_PzrZs`
+
+### Tabs
+
+| Tab | Size | Status | Notes |
+|-----|------|--------|-------|
+| Copy of Meta Feed_City | 111,351×31 | ✅ Done | Production city feed |
+| Copy of Meta Feed_Countries | 2,401×29 | ✅ Done | Production country feed |
+| Control Room | 958×52 | 📊 Source | 952 cities, 3 budget columns |
+| PMax Feed | 1000×52 | 📋 Template | Not yet generated |
+| App Feed | 1000×24 | 📋 Template | Not yet generated |
+| geo_helper | 228,724×26 | ⚠️ 5.9M cells | Geo targeting data — don't touch |
+| Meta Feed_City | 1×1 | ⬇️ Shrunk | Freed cells |
+| Meta Feed_Countries | 1×1 | ⬇️ Shrunk | Freed cells |
+| 1. Icon Human | 1258×17 | 📸 Creative | Image/creative source |
+| 2. Vehicle Focus | 877×19 | 📸 Creative | Image/creative source |
+| 3. Referrals | 1000×20 | 📸 Creative | Image/creative source |
+| 4. Local Angle | 1000×22 | 📸 Creative | Image/creative source |
+| City Mappings | 1000×28 | 📊 Reference | City geo mappings |
+| Copies | 1000×26 | 📝 Content | Ad copy translations |
+| ST_Cities | 1855×28 | 📊 Reference | City data |
+| ST_Countries | 1000×26 | 📊 Reference | Country data |
+
+### Control Room Structure (row 3 = headers, data from row 4)
+
+```
+Row 2 (section groups): General settings | Activity | Creative Set Up | Meta settings | PMax settings | App settings
+
+Row 3 (headers):
+  A: City code
+  B: Country code
+  C: City size
+  D: (empty)
+  E: Strategy
+  F: Meta (activity flag)
+  G: PMax (activity flag)
+  H: App (activity flag)
+  I: Ethnicity
+  J: Gender
+  K: Version
+  L: Season
+  M: (empty)
+  N: Daily budget (META)        ← Meta channel budget
+  O: A. General (ad set status)
+  P: B. Winter (ad set status)
+  Q: C. Summer (ad set status)
+  R-AA: Individual ad statuses (A. Icon human, A. Vehicle focus, etc.)
+  AB: (empty)
+  AC: Daily budget (PMAX)       ← PMax channel budget
+  AD-AM: PMax ad group statuses
+  AN: (empty)
+  AO: Daily budget (APP)        ← App channel budget
+  AP-AY: App ad group statuses
+```
+
+**Key**: 3 separate "Daily budget" columns for 3 channels at cols N, AC, AO.
+
+### How Budget Connects to Feeds
+
+Each feed type should XLOOKUP its own budget column:
+- **Meta Feed** → `=xlookup(city_code, 'Control Room'!A:A, 'Control Room'!N:N)`
+- **PMax Feed** → `=xlookup(city_code, 'Control Room'!A:A, 'Control Room'!AC:AC)`
+- **App Feed** → `=xlookup(city_code, 'Control Room'!A:A, 'Control Room'!AO:AO)`
 
 ---
 
@@ -61,13 +329,13 @@ This project generates Meta (Facebook) advertising feed spreadsheets for Glovo's
 
 **Logic**:
 - 952 cities (from Control Room) × languages per country × 50 ad template rows
-- 31 columns (includes City Code, City Size columns that country version doesn't have)
+- 31 columns (includes City Code, City Size)
 
-**Key formulas**:
+**Key formulas injected**:
 - Campaign name: `="Facebook_Glovers_"&G{row}&"_MultiCity_2026"`
 - Ad Set Name: `=CONCATENATE(G{row},"_",H{row},"_",L{row})` — NO trailing underscore, NO language code
 
-**Batch writing**: Writes in batches of 10,000 rows with 10s rate-limit delays (needed for 111K rows).
+**Batch writing**: Writes in batches of 10,000 rows with 10s rate-limit delays.
 
 ---
 
@@ -79,13 +347,13 @@ This project generates Meta (Facebook) advertising feed spreadsheets for Glovo's
 
 **Logic**:
 - 22 countries × languages per country (48 total slots) × 50 ad template rows
-- 29 columns
+- 29 columns (NO City Code, City Size)
 
-**Key formulas**:
+**Key formulas injected**:
 - Campaign name: `="Facebook_Glovers_"&G{row}&"_Country_2026"`
 - Ad Set Name: `=CONCATENATE(G{row},"_",J{row})` → produces e.g. `AM_General`, `PL_Winter`
 
-**Single write**: Small enough to upload in one API call.
+**Single write**: Small enough for one API call (~2,400 rows).
 
 ---
 
@@ -110,30 +378,16 @@ This project generates Meta (Facebook) advertising feed spreadsheets for Glovo's
 
 ## Country → Language Mappings (MANDATORY)
 
-Source: **Global URL Generator** file. This is the authoritative source. Never use Capital_feed as primary.
+Source: **Global URL Generator** file. This is the authoritative source.
 
 ```
-BA → bs, en
-ME → sr, en
-MD → ro, ru, en
-BG → bg, en
-HR → hr, en
-UG → en
-RO → ro, en
-RS → rs, en
-KE → sw, en
-NG → en
-CI → fr, en
-TN → ar, fr, en
-MA → ar, en
-PT → pt, en
-AM → hy, ru, en
-GE → ka, en
-PL → pl, ru, uk, en
-KZ → kk, ru, en
-KG → ru, en
-IT → it, en
-UA → uk, en
+BA → bs, en          ME → sr, en          MD → ro, ru, en
+BG → bg, en          HR → hr, en          UG → en
+RO → ro, en          RS → rs, en          KE → sw, en
+NG → en              CI → fr, en          TN → ar, fr, en
+MA → ar, en          PT → pt, en          AM → hy, ru, en
+GE → ka, en          PL → pl, ru, uk, en  KZ → kk, ru, en
+KG → ru, en          IT → it, en          UA → uk, en
 ES → es, en
 ```
 
@@ -150,7 +404,6 @@ uk=Ukrainian, kk=Kazakh, it=Italian, es=Spanish
 ## Column Layouts
 
 ### City Feed (31 columns)
-
 ```
 ID, helper, Ad label, Campaign status, Ad set status, Ad status,
 Country, City Code, City Size, Target area, Budget,
@@ -163,7 +416,6 @@ CTA_Button, CTA_Link
 ```
 
 ### Country Feed (29 columns)
-
 ```
 ID, helper, Ad label, Campaign status, Ad set status, Ad status,
 Country, Target area, Budget,
@@ -175,7 +427,36 @@ CTA, CTA_Caption, Square, Horizontal, Vertical,
 CTA_Button, CTA_Link
 ```
 
-**Difference**: Country feed has NO "City Code" or "City Size" columns.
+---
+
+## Budget Flow — End to End
+
+```
+Google Ads API (external)
+    │
+    ▼ IMPORTRANGE (automatic refresh)
+Split_performance (monthly CPD per channel per city)
+    │
+    ▼ XLOOKUP by city code
+Split_v2 (cols AI-AN: raw costs)
+    │
+    ▼ Inversion + weighting
+Split_v2 (cols Z-AB: efficiency weights)
+    │
+    ▼ Normalization + exclusions
+Split_v2 (cols Q-S: split with defaults)
+    │
+    ▼ Minimum budget threshold (€5)
+Split_v2 (cols I-L: FINAL SPLIT %)
+    │
+    ├─→ PM_overrides (Python optimizer can override cols E-H)
+    │
+    ▼ total_daily × split_% = channel budget
+Control Room (col N = Meta budget, col AC = PMax budget, col AO = App budget)
+    │
+    ▼ XLOOKUP by city code
+Meta Feed / PMax Feed / App Feed (each row gets its channel's daily budget)
+```
 
 ---
 
@@ -183,51 +464,39 @@ CTA_Button, CTA_Link
 
 ### 10 Million Cell Limit
 
-The Google Sheets workbook has a **hard 10M cell limit**. As of now:
-- `geo_helper` tab: **5,946,824 cells** (228K rows × 26 cols)
-- `Copy of Meta Feed_City`: **3,451,881 cells** (111K rows × 31 cols)
-- Everything else: ~500K cells
-- **Total: ~9.9M / 10M**
+The workbook is at **~9.95M / 10M cells**:
+- `geo_helper`: **5,946,824 cells** (228K × 26)
+- `Copy of Meta Feed_City`: **3,451,881 cells** (111K × 31)
+- Everything else: ~550K cells
 
-**Before any write operation**, you MUST:
-1. Shrink the target tab to 1×1 first (frees its cells)
-2. If still not enough, shrink other unused tabs (e.g., "Meta Feed_City", "Meta Feed_Countries" originals were shrunk to 1×1)
+**Before any write**, MUST:
+1. Shrink target tab to 1×1 first
+2. If needed, shrink other unused tabs
 3. Only then expand and write
 
-**Strategy that works**:
 ```python
-# 1. Clear content
+# Strategy that works:
 sheets.values().clear(range="'TabName'!A:ZZ")
-# 2. Shrink to 1x1
 batchUpdate → gridProperties: rowCount=1, columnCount=1
-# 3. Expand to needed size
 batchUpdate → gridProperties: rowCount=N, columnCount=M
-# 4. Write data
 sheets.values().update(...)
 ```
 
 ### Rate Limits
-
-For large uploads (>10K rows), batch in chunks of 10,000 with `time.sleep(10)` between batches.
+For >10K rows, batch in chunks of 10,000 with `time.sleep(10)`.
 
 ### Formula Syntax
-
-- Use `USER_ENTERED` as `valueInputOption` so formulas are evaluated
-- Formulas reference their own row number (calculated during generation)
-- Row numbering starts at 2 (row 1 = headers)
+- `valueInputOption="USER_ENTERED"` required for formulas
+- Row references calculated at generation time (row 1 = headers, data starts row 2)
 
 ---
 
-## Source Files Location
+## Credentials
 
-All source CSVs are in `C:\Users\PabloGimeno\Downloads\`:
-
-| File | Purpose |
-|------|---------|
-| `Master Feed - 2026 - Control Room.csv` | 952 cities with country codes, city sizes |
-| `DH Migration - UTMs - Global URL Generator (2).csv` | Country → language mappings (MANDATORY) |
-| `Master Feed _ Vol 3 - Capital_feed (1).csv` | Language name/code reference |
-| `Master Feed - 2026 - Meta Feed_Countries.csv` | Original template (29 columns) |
+- **File**: `credentials.json` (in repo root or Referral-Calculator)
+- **Service account**: `fsp-growth-bot@dhub-glovo.iam.gserviceaccount.com`
+- **Project**: `dhub-glovo`
+- **Scopes**: `spreadsheets`, `drive`
 
 ---
 
@@ -236,69 +505,29 @@ All source CSVs are in `C:\Users\PabloGimeno\Downloads\`:
 ```
 google-auth
 google-api-python-client
-gspread (installed but NOT used — Sheets API v4 direct is preferred)
 ```
 
-**Why not gspread?** It doesn't handle the 10M cell limit well. Direct Sheets API gives more control over grid resize operations.
+**Why not gspread?** Doesn't handle 10M cell limit. Direct Sheets API v4 gives grid resize control.
 
 ---
 
-## Tabs in the Workbook
+## Source Files
 
-| Tab | Status | Notes |
-|-----|--------|-------|
-| Copy of Meta Feed_City | ✅ Done | 111,350 rows, production data |
-| Copy of Meta Feed_Countries | ✅ Done | 2,400 rows, production data |
-| Meta Feed_City | ⬇️ Shrunk to 1×1 | Original template, freed cells |
-| Meta Feed_Countries | ⬇️ Shrunk to 1×1 | Original template, freed cells |
-| Control Room | 📊 Source | 952 cities, read-only |
-| geo_helper | ⚠️ 5.9M cells | Don't touch — huge but needed |
-| PMax Feed | 📋 Template | Not yet generated |
-| App Feed | 📋 Template | Not yet generated |
+| File (in Downloads) | Purpose |
+|---------------------|---------|
+| `Master Feed - 2026 - Control Room.csv` | 952 cities with country codes, city sizes |
+| `DH Migration - UTMs - Global URL Generator (2).csv` | Country → language mappings (MANDATORY) |
+| `Master Feed _ Vol 3 - Capital_feed (1).csv` | Language name/code reference |
 
 ---
 
-## Common Operations
+## Related Repos
 
-### Re-run city feed
-```bash
-cd C:\Users\PabloGimeno\Documents\GitHub\Referral-Calculator
-python meta_feed_city_generator.py
-```
-
-### Re-run country feed
-```bash
-cd C:\Users\PabloGimeno\Documents\GitHub\Referral-Calculator
-python meta_feed_countries_generator.py
-```
-
-### Check cell usage
-```bash
-cd C:\Users\PabloGimeno
-python check_cells.py
-```
-
-### Free cells (shrink unused tabs)
-```bash
-cd C:\Users\PabloGimeno
-python free_cells.py
-```
-
----
-
-## Verification Checklist
-
-After running any generator, verify:
-
-1. **Row count**: Expected = (entities × languages × 50) + 1 header
-   - City: 952 cities × avg ~2.34 langs × 50 = 111,350
-   - Country: 22 countries × 48 total lang slots × ... wait, it's sum of langs per country × 50 = 2,400
-2. **All 22 countries present** with correct language codes per URL Generator
-3. **Formulas resolve** (Campaign name, Ad Set Name show computed values in Sheets)
-4. **No trailing underscores** in Ad Set Name
-5. **Column headers** all present even if data columns are empty
-6. **Language column** has full names (English, not "en")
-7. **Language code column** has codes (en, not "English")
+| Repo | Purpose |
+|------|---------|
+| `pablogimenoglovo/Master_feed_2026` | This repo — feed generators |
+| `pablogimenoglovo/pm-budget-optimizer` | Python optimizer that writes PM_overrides |
+| `pablogimenoglovo/Referral-Calculator` | Credentials + utility scripts |
 
 ---
 
@@ -306,28 +535,50 @@ After running any generator, verify:
 
 ### Country Feed (2,400 rows)
 ```
-BA(2) + ME(2) + MD(3) + BG(2) + HR(2) + UG(1) + RO(2) + RS(2) +
-KE(2) + NG(1) + CI(2) + TN(3) + MA(2) + PT(2) + AM(3) + GE(2) +
-PL(4) + KZ(3) + KG(2) + IT(2) + UA(2) + ES(2) = 48 language slots
-
-48 × 50 rows = 2,400 rows
+BA(2)+ME(2)+MD(3)+BG(2)+HR(2)+UG(1)+RO(2)+RS(2)+KE(2)+NG(1)+
+CI(2)+TN(3)+MA(2)+PT(2)+AM(3)+GE(2)+PL(4)+KZ(3)+KG(2)+IT(2)+
+UA(2)+ES(2) = 48 language slots × 50 rows = 2,400 rows
 ```
 
 ### City Feed (111,350 rows)
 ```
-952 cities, each inherits its country's languages:
-Sum across all cities of (languages_for_that_city's_country × 50)
-= 111,350 rows
+952 cities × (languages per country) × 50 = 111,350 rows
 ```
+
+---
+
+## Pending Work / TODOs
+
+1. **Integrate `split_app` into Split_v2 formulas** — currently headers exist but formulas only handle 3 channels
+2. **Add Budget formula to Meta feeds** — currently Budget column is empty; should XLOOKUP from Control Room col N
+3. **Generate PMax Feed** — same pattern but lookup budget from col AC
+4. **Generate App Feed** — same pattern but lookup budget from col AO
+5. **Add ad status formulas** — reference Control Room cols O-AA for Meta ad set/ad statuses
+6. **Wire up Copies, Images, Earnings** — FILTER/INDEX formulas from Vol 3 reference
+
+---
+
+## Verification Checklist
+
+After running any generator:
+
+1. **Row count** matches expected (entities × languages × 50 + 1 header)
+2. **All 22 countries** present with correct language codes per URL Generator
+3. **Formulas resolve** (Campaign name, Ad Set Name show computed values)
+4. **No trailing underscores** in Ad Set Name
+5. **All column headers present** even if data columns are empty
+6. **Language column** = full names (English, not "en")
+7. **Language code column** = codes (en, not "English")
 
 ---
 
 ## Gotchas & Lessons Learned
 
-1. **PowerShell + Python one-liners don't mix** — always write helper `.py` files instead
-2. **10M cell limit is workbook-wide** — shrinking one tab frees cells for another
-3. **`gspread` resize fails silently at 10M** — use `googleapiclient` directly
-4. **Google Sheets CSV export caps at ~50K rows** — use API reads for verification
-5. **`valueInputOption="USER_ENTERED"`** is required for formulas to work
-6. **Row references in formulas must be calculated at generation time** — each row's formula points to its own row number
-7. **Original tabs (Meta Feed_City, Meta Feed_Countries) were shrunk** to make room — don't re-expand them unless you shrink something else first
+1. **10M cell limit is workbook-wide** — shrinking one tab frees cells for another
+2. **PowerShell + Python one-liners don't mix** — always write helper `.py` files
+3. **Google Sheets CSV export caps at ~50K rows** — use API reads for verification
+4. **`valueInputOption="USER_ENTERED"`** required for formulas to work
+5. **Row references in formulas must be pre-calculated** at generation time
+6. **Original template tabs were shrunk to 1×1** to make room — don't re-expand without freeing elsewhere
+7. **Split_v2 overrides (E-H) are static** — written by PM optimizer or manually, not formulas
+8. **Control Room has 3 budget columns** (N, AC, AO) — one per channel, not one total
